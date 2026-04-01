@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup_whisper.sh — Install whisper.cpp with Vulkan support and download the quantized turbo model.
+# setup_whisper.sh — Install whisper.cpp with Vulkan GPU support and download the quantized turbo model.
 # Idempotent: safe to run multiple times.
 set -euo pipefail
 
