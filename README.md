@@ -94,6 +94,21 @@ python main.py
 - Transcribed text is automatically pasted into the focused window via clipboard
 - **Right-click** for context menu (Start/Stop, Quit)
 
+## Debugging / Profiling
+
+Each dictation session writes detailed timing data to `/tmp/vibe_debug.log`. The log includes:
+
+- **Audio processing time** — how long `sox` silence trimming takes
+- **Whisper processing time** — full `whisper-cli` duration, plus its internal stderr metrics (model load, mel spectrogram, encode, decode times)
+- **Typing/paste time** — how long `xsel` + `xdotool` clipboard paste takes
+- **Total pipeline time** — end-to-end from stop-recording to text-injected
+
+The log is truncated at the start of each new session. To inspect after a dictation:
+
+```bash
+cat /tmp/vibe_debug.log
+```
+
 ## How It Works
 
 The pipeline has 5 stages:
@@ -128,6 +143,7 @@ whisper_dictation/
 
 ## Changelog
 
+- **2026-04-01T10:30 UTC-6** — Added per-phase profiling to the transcription pipeline. Each session now logs precise timing breakdown (sox trim, whisper-cli, clipboard paste) and full whisper.cpp stderr metrics to `/tmp/vibe_debug.log`.
 - **2026-04-01T10:23 UTC-6** — Fixed auto-paste: replaced `xclip` with `xsel --clipboard --input` for clipboard writes. `xclip` was hanging (5s timeout) in the background QThread because it forks to serve X11 selection requests. `xsel` writes and exits immediately. Also added `xdotool windowactivate --sync` to re-focus the target window before pasting.
 - **2026-04-01T10:05 UTC-6** — Replaced `xdotool type --delay 2` with instant clipboard paste (`xsel` + `xdotool key ctrl+v`). Text injection is now effectively instant regardless of transcription length.
 - **2026-04-01T14:38 UTC-6** — Major refactor: replaced real-time `whisper-stream` with batch `arecord` → `sox` → `whisper-cli` → `xdotool` pipeline. Added `setup_whisper.sh` for Vulkan compilation and Large V3 Turbo Q5 model download. New 3-state UI (idle/recording/processing).
@@ -135,4 +151,4 @@ whisper_dictation/
 
 ---
 
-*Last updated: 2026-04-01T10:23 UTC-6*
+*Last updated: 2026-04-01T10:30 UTC-6*

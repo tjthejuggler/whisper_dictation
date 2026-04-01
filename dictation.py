@@ -11,7 +11,7 @@ from PyQt5.QtCore import QObject, QThread, pyqtSignal
 import config
 
 # ── Logging ────────────────────────────────────────────────────────
-_LOG_PATH = "/tmp/dictation_debug.log"
+_LOG_PATH = "/tmp/vibe_debug.log"
 
 log = logging.getLogger("dictation")
 log.setLevel(logging.DEBUG)
@@ -52,21 +52,55 @@ class TranscriptionWorker(QObject):
         self._target_window_id = target_window_id
 
     def run(self):
-        """Execute the full transcription pipeline."""
+        """Execute the full transcription pipeline with per-phase timing."""
+        timings = {}
+        pipeline_start = time.monotonic()
         try:
+            t0 = time.monotonic()
             self._trim_silence()
+            timings["audio_trim"] = time.monotonic() - t0
+
+            t0 = time.monotonic()
             self._transcribe()
+            timings["whisper"] = time.monotonic() - t0
+
+            t0 = time.monotonic()
             text = self._read_output()
+            timings["read_output"] = time.monotonic() - t0
+
             if text:
+                t0 = time.monotonic()
                 self._inject_text(text, self._target_window_id)
+                timings["inject_text"] = time.monotonic() - t0
             else:
                 log.info("No text to inject (empty transcription)")
+                timings["inject_text"] = 0.0
         except Exception as exc:
             log.error("Pipeline error: %s", exc)
             self.error.emit(str(exc))
         finally:
+            timings["total"] = time.monotonic() - pipeline_start
+            self._log_timing_summary(timings)
             self._cleanup()
             self.finished.emit()
+
+    @staticmethod
+    def _log_timing_summary(timings):
+        """Write a clear timing breakdown to the log."""
+        log.info("=" * 50)
+        log.info("TIMING BREAKDOWN")
+        log.info("-" * 50)
+        log.info("Audio processing time : %.3f seconds",
+                 timings.get("audio_trim", 0))
+        log.info("Whisper processing time: %.3f seconds",
+                 timings.get("whisper", 0))
+        log.info("Read output time       : %.3f seconds",
+                 timings.get("read_output", 0))
+        log.info("Typing/paste time      : %.3f seconds",
+                 timings.get("inject_text", 0))
+        log.info("Total pipeline time    : %.3f seconds",
+                 timings.get("total", 0))
+        log.info("=" * 50)
 
     def _trim_silence(self):
         """Strip leading/trailing silence with sox."""
@@ -95,14 +129,16 @@ class TranscriptionWorker(QObject):
             capture_output=True, timeout=120, check=False,
         )
         log.info("whisper-cli returncode: %d", result.returncode)
-        log.debug("whisper-cli stdout: %s",
-                  result.stdout.decode(errors="replace")[:500])
-        log.debug("whisper-cli stderr: %s",
-                  result.stderr.decode(errors="replace")[:500])
+        log.debug("whisper-cli stdout:\n%s",
+                  result.stdout.decode(errors="replace"))
+        # Log the FULL stderr — contains whisper.cpp performance metrics
+        # (load time, mel time, encode time, decode time, etc.)
+        stderr_text = result.stderr.decode(errors="replace")
+        log.info("whisper-cli stderr (full):\n%s", stderr_text)
         if result.returncode != 0:
-            stderr = result.stderr.decode(errors="replace").strip()
             raise RuntimeError(
-                f"whisper-cli failed (code {result.returncode}): {stderr[:200]}"
+                f"whisper-cli failed (code {result.returncode}): "
+                f"{stderr_text.strip()[:200]}"
             )
 
     def _read_output(self):
@@ -120,21 +156,25 @@ class TranscriptionWorker(QObject):
         """Paste text into the target X11 window via clipboard (xsel + xdotool Ctrl+V)."""
         log.info("Injecting text via clipboard paste (%d chars)", len(text))
         try:
-            # Copy text to clipboard using xsel (exits immediately, unlike xclip
-            # which forks to serve X selection requests and can hang in threads)
+            # Copy text to clipboard using xsel
+            t0 = time.monotonic()
             subprocess.run(
                 ["xsel", "--clipboard", "--input"],
                 input=text.encode("utf-8"),
                 timeout=5, check=True, capture_output=True,
             )
-            log.info("Clipboard set via xsel")
+            log.info("Clipboard set via xsel (%.3f s)", time.monotonic() - t0)
+
             # Re-focus the target window so the paste lands in the right place
             if target_window_id:
+                t0 = time.monotonic()
                 subprocess.run(
                     ["xdotool", "windowactivate", "--sync", target_window_id],
                     timeout=3, check=False, capture_output=True,
                 )
+                log.info("Window re-focus (%.3f s)", time.monotonic() - t0)
                 time.sleep(0.05)
+
             # Paste immediately
             if target_window_id:
                 cmd = ["xdotool", "key", "--clearmodifiers",
@@ -142,10 +182,12 @@ class TranscriptionWorker(QObject):
             else:
                 cmd = ["xdotool", "key", "--clearmodifiers", "ctrl+v"]
             log.info("Paste command: %s", " ".join(cmd))
+            t0 = time.monotonic()
             result = subprocess.run(
                 cmd, timeout=5, check=False, capture_output=True,
             )
-            log.info("xdotool paste returncode: %d", result.returncode)
+            log.info("xdotool paste returncode: %d (%.3f s)",
+                     result.returncode, time.monotonic() - t0)
             if result.returncode != 0:
                 log.error("xdotool stderr: %s",
                          result.stderr.decode(errors="replace"))
