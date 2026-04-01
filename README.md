@@ -11,7 +11,8 @@ Click the tray icon to start recording. Click again to stop, transcribe, and typ
 - **PyQt5** — for the system tray icon
 - **arecord** — for audio capture (`alsa-utils` package)
 - **sox** — for silence trimming
-- **xdotool** — for typing text into the active window
+- **xdotool** — for simulating keyboard paste into the active window
+- **xsel** — for clipboard-based text injection (exits immediately, unlike xclip)
 - **whisper.cpp** — compiled `whisper-cli` binary with Vulkan support
 
 ## Quick Start
@@ -39,7 +40,7 @@ python main.py
 ### System Dependencies
 
 ```bash
-sudo apt install alsa-utils sox xdotool
+sudo apt install alsa-utils sox xdotool xsel
 ```
 
 ### whisper.cpp with Vulkan
@@ -75,6 +76,14 @@ This creates:
 
 ## Usage
 
+Run from anywhere on your system using the launcher script:
+
+```bash
+/home/twain/Projects/whisper_dictation/run_dictation.sh
+```
+
+Or manually from the project directory:
+
 ```bash
 source venv/bin/activate
 python main.py
@@ -82,7 +91,7 @@ python main.py
 
 - **Left-click** the tray icon to **start recording** (icon turns green)
 - **Left-click again** to **stop recording and transcribe** (icon shows processing state)
-- Transcribed text is automatically typed into the focused window
+- Transcribed text is automatically pasted into the focused window via clipboard
 - **Right-click** for context menu (Start/Stop, Quit)
 
 ## How It Works
@@ -97,7 +106,7 @@ The pipeline has 5 stages:
    - Entropy threshold of 2.4 (anti-hallucination)
    - Context prompt biased for coding terminology
    - English language forced
-5. **Inject** — `xdotool` types the transcribed text into the active X11 window
+5. **Inject** — `xsel` copies text to clipboard, then `xdotool` simulates Ctrl+V to paste instantly
 
 ## File Structure
 
@@ -119,9 +128,11 @@ whisper_dictation/
 
 ## Changelog
 
+- **2026-04-01T10:23 UTC-6** — Fixed auto-paste: replaced `xclip` with `xsel --clipboard --input` for clipboard writes. `xclip` was hanging (5s timeout) in the background QThread because it forks to serve X11 selection requests. `xsel` writes and exits immediately. Also added `xdotool windowactivate --sync` to re-focus the target window before pasting.
+- **2026-04-01T10:05 UTC-6** — Replaced `xdotool type --delay 2` with instant clipboard paste (`xsel` + `xdotool key ctrl+v`). Text injection is now effectively instant regardless of transcription length.
 - **2026-04-01T14:38 UTC-6** — Major refactor: replaced real-time `whisper-stream` with batch `arecord` → `sox` → `whisper-cli` → `xdotool` pipeline. Added `setup_whisper.sh` for Vulkan compilation and Large V3 Turbo Q5 model download. New 3-state UI (idle/recording/processing).
 - **2026-04-01T04:56 UTC** — Fixed `\r` partial transcriptions being injected as final text.
 
 ---
 
-*Last updated: 2026-04-01T14:38 UTC-6*
+*Last updated: 2026-04-01T10:23 UTC-6*

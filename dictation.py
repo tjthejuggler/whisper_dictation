@@ -4,6 +4,7 @@ import logging
 import os
 import signal
 import subprocess
+import time
 
 from PyQt5.QtCore import QObject, QThread, pyqtSignal
 
@@ -41,10 +42,14 @@ STATE_PROCESSING = "processing"
 
 # ── Transcription Worker (runs in QThread) ─────────────────────────
 class TranscriptionWorker(QObject):
-    """Runs sox → whisper-cli → xdotool in a background thread."""
+    """Runs sox → whisper-cli → clipboard paste in a background thread."""
 
     finished = pyqtSignal()
     error = pyqtSignal(str)
+
+    def __init__(self, target_window_id=None):
+        super().__init__()
+        self._target_window_id = target_window_id
 
     def run(self):
         """Execute the full transcription pipeline."""
@@ -53,7 +58,7 @@ class TranscriptionWorker(QObject):
             self._transcribe()
             text = self._read_output()
             if text:
-                self._inject_text(text)
+                self._inject_text(text, self._target_window_id)
             else:
                 log.info("No text to inject (empty transcription)")
         except Exception as exc:
@@ -111,22 +116,46 @@ class TranscriptionWorker(QObject):
         return text
 
     @staticmethod
-    def _inject_text(text):
-        """Type text into the active X11 window using xdotool."""
-        log.info("Injecting text via xdotool (%d chars)", len(text))
+    def _inject_text(text, target_window_id=None):
+        """Paste text into the target X11 window via clipboard (xsel + xdotool Ctrl+V)."""
+        log.info("Injecting text via clipboard paste (%d chars)", len(text))
         try:
-            result = subprocess.run(
-                ["xdotool", "type", "--clearmodifiers", "--delay", "2", "--", text],
-                timeout=30, check=False, capture_output=True,
+            # Copy text to clipboard using xsel (exits immediately, unlike xclip
+            # which forks to serve X selection requests and can hang in threads)
+            subprocess.run(
+                ["xsel", "--clipboard", "--input"],
+                input=text.encode("utf-8"),
+                timeout=5, check=True, capture_output=True,
             )
-            log.info("xdotool returncode: %d", result.returncode)
+            log.info("Clipboard set via xsel")
+            # Re-focus the target window so the paste lands in the right place
+            if target_window_id:
+                subprocess.run(
+                    ["xdotool", "windowactivate", "--sync", target_window_id],
+                    timeout=3, check=False, capture_output=True,
+                )
+                time.sleep(0.05)
+            # Paste immediately
+            if target_window_id:
+                cmd = ["xdotool", "key", "--clearmodifiers",
+                       "--window", target_window_id, "ctrl+v"]
+            else:
+                cmd = ["xdotool", "key", "--clearmodifiers", "ctrl+v"]
+            log.info("Paste command: %s", " ".join(cmd))
+            result = subprocess.run(
+                cmd, timeout=5, check=False, capture_output=True,
+            )
+            log.info("xdotool paste returncode: %d", result.returncode)
             if result.returncode != 0:
                 log.error("xdotool stderr: %s",
                          result.stderr.decode(errors="replace"))
-        except FileNotFoundError:
-            log.error("xdotool not found!")
+        except FileNotFoundError as exc:
+            log.error("Required tool not found: %s", exc)
         except subprocess.TimeoutExpired:
-            log.error("xdotool timed out")
+            log.error("Clipboard/paste timed out")
+        except subprocess.CalledProcessError as exc:
+            log.error("xsel failed: %s",
+                     exc.stderr.decode(errors="replace") if exc.stderr else "unknown")
 
     @staticmethod
     def _cleanup():
@@ -138,6 +167,21 @@ class TranscriptionWorker(QObject):
                     log.debug("Removed: %s", path)
             except OSError as exc:
                 log.warning("Failed to remove %s: %s", path, exc)
+
+
+def _get_focused_window_id():
+    """Get the currently focused X11 window ID."""
+    try:
+        result = subprocess.run(
+            ["xdotool", "getactivewindow"],
+            capture_output=True, timeout=2, check=True,
+        )
+        wid = result.stdout.decode().strip()
+        log.info("Captured focused window ID: %s", wid)
+        return wid
+    except Exception as exc:
+        log.warning("Could not get focused window ID: %s", exc)
+        return None
 
 
 # ── Dictation Manager ─────────────────────────────────────────────
@@ -153,6 +197,7 @@ class DictationManager(QObject):
         self._arecord_proc = None
         self._worker = None
         self._thread = None
+        self._target_window_id = None
 
     @property
     def state(self):
@@ -170,6 +215,9 @@ class DictationManager(QObject):
         """Launch arecord to capture microphone input."""
         _reset_log_handler()
         log.info("===== session starting =====")
+
+        # Capture the focused window before recording starts
+        self._target_window_id = _get_focused_window_id()
 
         # Clean up any leftover temp files
         for path in (config.RAW_WAV, config.TRIMMED_WAV, config.OUTPUT_TXT):
@@ -233,7 +281,9 @@ class DictationManager(QObject):
 
         # Start transcription in background thread
         self._thread = QThread()
-        self._worker = TranscriptionWorker()
+        self._worker = TranscriptionWorker(
+            target_window_id=self._target_window_id
+        )
         self._worker.moveToThread(self._thread)
 
         self._thread.started.connect(self._worker.run)
@@ -250,6 +300,7 @@ class DictationManager(QObject):
             self._thread.wait(5000)
             self._thread = None
         self._worker = None
+        self._target_window_id = None
         self._state = STATE_IDLE
         self.state_changed.emit(STATE_IDLE)
 
@@ -273,4 +324,5 @@ class DictationManager(QObject):
             self._thread.wait(5000)
             self._thread = None
         self._worker = None
+        self._target_window_id = None
         self._state = STATE_IDLE

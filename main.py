@@ -5,11 +5,27 @@ import os
 import shutil
 import sys
 
-from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import QSize, Qt
+from PyQt5.QtGui import QIcon, QPixmap, QPainter
+from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
 
 import config
 from dictation import DictationManager, STATE_IDLE, STATE_RECORDING, STATE_PROCESSING
+
+
+def _load_svg_icon(path):
+    """Load an SVG file as a QIcon using QSvgRenderer (works regardless of CWD)."""
+    renderer = QSvgRenderer(path)
+    if not renderer.isValid():
+        # Fallback: try QIcon directly
+        return QIcon(path)
+    pixmap = QPixmap(QSize(64, 64))
+    pixmap.fill(Qt.transparent)  # Transparent
+    painter = QPainter(pixmap)
+    renderer.render(painter)
+    painter.end()
+    return QIcon(pixmap)
 
 
 def check_dependencies():
@@ -31,6 +47,8 @@ def check_dependencies():
         errors.append("sox not found. Install: sudo apt install sox")
     if shutil.which("xdotool") is None:
         errors.append("xdotool not found. Install: sudo apt install xdotool")
+    if shutil.which("xsel") is None:
+        errors.append("xsel not found. Install: sudo apt install xsel")
     return errors
 
 
@@ -42,9 +60,9 @@ class TrayApp:
         self.app.setQuitOnLastWindowClosed(False)
         self.app.setApplicationName("Whisper Dictation")
 
-        # Icons
-        self.icon_on = QIcon(config.ICON_MIC_ON)
-        self.icon_off = QIcon(config.ICON_MIC_OFF)
+        # Icons — render SVGs explicitly so they work regardless of CWD
+        self.icon_on = _load_svg_icon(config.ICON_MIC_ON)
+        self.icon_off = _load_svg_icon(config.ICON_MIC_OFF)
 
         # System tray icon
         self.tray = QSystemTrayIcon(self.icon_off, self.app)

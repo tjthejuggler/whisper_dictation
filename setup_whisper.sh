@@ -20,7 +20,7 @@ MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$MODEL_NAME
 
 # ── 1. System dependencies ──────────────────────────────────────────────────
 echo -e "\n${arrow} Installing system dependencies …"
-sudo apt install -y build-essential cmake libvulkan-dev vulkan-tools sox alsa-utils xdotool
+sudo apt install -y build-essential cmake libvulkan-dev vulkan-tools sox alsa-utils xdotool xclip
 echo -e "${check} System dependencies installed.\n"
 
 # ── 2. Clone & build whisper.cpp ─────────────────────────────────────────────
