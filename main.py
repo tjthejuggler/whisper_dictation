@@ -61,9 +61,10 @@ def check_dependencies():
 class TrayApp(QObject):
     """System tray application — integrates audio engine, dictation, wake word, OSD."""
 
-    # Signal to handle wake word from audio thread safely
+    # Signals to handle audio-thread events safely on the Qt main thread
     _wake_word_detected = pyqtSignal()
     _silence_timeout_reached = pyqtSignal()
+    _vad_activity = pyqtSignal(bool)  # True = voice, False = silence
 
     def __init__(self):
         self.app = QApplication(sys.argv)
@@ -106,7 +107,9 @@ class TrayApp(QObject):
         # Connect cross-thread signals
         self._wake_word_detected.connect(self._on_wake_word)
         self._silence_timeout_reached.connect(self._on_command_silence)
+        self._vad_activity.connect(self.osd.on_voice_activity)
         self.audio_engine.set_wake_callback(self._wake_word_bridge)
+        self.audio_engine.set_vad_activity_callback(self._vad_activity_bridge)
 
         # System tray icon
         self.tray = QSystemTrayIcon(self.icon_off, self.app)
@@ -161,6 +164,10 @@ class TrayApp(QObject):
     def _silence_timeout_bridge(self):
         """Bridge silence timeout from audio thread to Qt main thread."""
         self._silence_timeout_reached.emit()
+
+    def _vad_activity_bridge(self, has_voice):
+        """Bridge VAD activity from audio thread to Qt main thread."""
+        self._vad_activity.emit(has_voice)
 
     def _on_command_silence(self):
         """Silence detected after wake word — transcribe and process command."""

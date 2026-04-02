@@ -8,7 +8,7 @@ A locally-hosted voice assistant and dictation system tray application for KDE P
 - **Voice-Triggered Dictation (Mode B):** Say the wake word → say "Dictate" → speak freely → silence auto-stops and pastes text.
 - **Voice Commands:** Say the wake word → speak a mapped phrase → executes a keyboard shortcut via `xdotool`.
 - **Wake Word Detection:** Always-on listening via `openwakeword` (runs locally, no cloud).
-- **OSD Popup:** Semi-transparent floating pill shows "Listening..." when wake word is detected.
+- **OSD Popup:** Old-timey silent-film style floating panel shows "Listening..." with 3x-scaled voice-reactive avatar image (brightens on speech, fades on silence) when wake word is detected.
 - **Settings GUI:** Right-click tray icon → Settings to configure silence timeout and voice command mappings.
 - **Unified Audio Engine:** Single PyAudio stream prevents ALSA/PipeWire device lockouts.
 
@@ -242,7 +242,7 @@ whisper_dictation/
 ├── dictation.py         # DictationManager — record/trim/transcribe/inject pipeline
 ├── voice_commands.py    # Command matching and xdotool shortcut execution
 ├── settings_manager.py  # JSON config persistence and Settings GUI window
-├── osd_popup.py         # On-Screen Display popup (borderless, semi-transparent)
+├── osd_popup.py         # On-Screen Display popup (old-timey silent-film style)
 ├── config.py            # Paths, constants, and default settings
 ├── setup_whisper.sh     # Build whisper.cpp with Vulkan + download model
 ├── install.sh           # Installer — autostart and app launcher entries
@@ -250,7 +250,8 @@ whisper_dictation/
 ├── config.json          # User settings (created on first save)
 ├── icons/
 │   ├── mic-on.svg       # Tray icon: recording active (green)
-│   └── mic-off.svg      # Tray icon: idle (gray)
+│   ├── mic-off.svg      # Tray icon: idle (gray)
+│   └── alkelly-head.png # Avatar shown below "Listening..." text
 ├── requirements.txt
 ├── plans/
 │   └── architecture.md
@@ -259,6 +260,8 @@ whisper_dictation/
 
 ## Changelog
 
+- **2026-04-01T19:54 UTC-6** — OSD fade-to-zero: avatar now fades completely to 0% opacity during silence (was 25%). When avatar drops below 10%, "Listening..." text rapidly fades out (300ms) so text disappears just before the image. Both elements fully vanish when silence timeout is reached. Text opacity restores instantly when speech resumes. Implemented via `_label_wrapper` QWidget with its own `QGraphicsOpacityEffect` (needed because the label already uses `QGraphicsDropShadowEffect`), monitored through `opacityChanged` signal.
+- **2026-04-01T19:47 UTC-6** — OSD popup aesthetic overhaul: old-timey silent-film style with large serif font (Georgia 28pt, warm ivory text on dark background, 3px letter-spacing). Added `alkelly-head.png` avatar image (scaled 3x to ~447×471) below "Listening..." text. Avatar is **voice-reactive**: starts at 25% opacity, boosts to 85% when speech detected (200ms fast response), fades to 0% during silence (1.5s gentle fade). VAD activity callback added to `AudioEngine.set_vad_activity_callback()`, bridged to OSD via `_vad_activity` Qt signal in `main.py`. Avatar only appears during "Listening..." state.
 - **2026-04-01T16:13 UTC-6** — Added custom wake word support. Users can now load any `.onnx` openwakeword model via a file browser in Settings (select "Custom (.onnx file)..." from the wake word dropdown). Custom model path is persisted in `config.json`. Also includes the 6 bundled models (Alexa, Hey Jarvis, Hey Marvin, Hey Mycroft, Timer, Weather). Fixed openwakeword v0.4.0 API usage.
 - **2026-04-01T15:38 UTC-6** — Major expansion: voice assistant features. Added wake word detection (`openwakeword`), voice-triggered dictation with silence auto-stop (`webrtcvad`), voice command mappings with keyboard shortcut execution, OSD popup, settings GUI, unified PyAudio audio engine. Migrated from PyQt5 to PyQt6. Replaced `arecord` subprocess with continuous PyAudio stream to prevent ALSA/PipeWire device lockouts. New modules: `audio_engine.py`, `osd_popup.py`, `voice_commands.py`, `settings_manager.py`. Existing dictation pipeline (sox → whisper-cli → xsel → xdotool) preserved intact.
 - **2026-04-01T13:56 UTC-6** — Identified root cause of Vulkan performance regression: Ubuntu's `glslc` (shaderc 2025.2) does not support `GL_EXT_integer_dot_product`, so whisper.cpp's DP4A-optimized quantized matmul shaders are compiled out at build time. This causes the Vulkan backend to fall back to generic (non-DP4A) compute shaders, resulting in ~5x slower encode times (~17s vs ~3.7s). The regression was introduced by whisper.cpp commit `0810f025` (2025-03-31) which added DP4A MMQ shaders behind a compile-time feature gate. Fix requires installing the LunarG Vulkan SDK's `glslc` and rebuilding. Documented in README under "Vulkan Performance Fix".
@@ -273,4 +276,4 @@ whisper_dictation/
 
 ---
 
-*Last updated: 2026-04-01T16:13 UTC-6*
+*Last updated: 2026-04-01T19:54 UTC-6*

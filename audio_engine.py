@@ -52,6 +52,7 @@ class AudioEngine:
         self._vad_enabled = False
         self._last_voice_time = 0.0
         self._silence_callback = None    # called when silence timeout exceeded
+        self._vad_activity_callback = None  # called with (has_voice: bool) each chunk
 
     def set_wake_callback(self, callback):
         """Set function to call when wake word is detected."""
@@ -60,6 +61,10 @@ class AudioEngine:
     def set_silence_callback(self, callback):
         """Set function to call when silence timeout is exceeded during recording."""
         self._silence_callback = callback
+
+    def set_vad_activity_callback(self, callback):
+        """Set function called with (has_voice: bool) on each VAD chunk during recording."""
+        self._vad_activity_callback = callback
 
     def set_silence_timeout(self, timeout):
         """Update the silence timeout (seconds)."""
@@ -275,7 +280,12 @@ class AudioEngine:
             now = time.monotonic()
             if has_voice:
                 self._last_voice_time = now
-            elif (now - self._last_voice_time) >= self._silence_timeout:
+
+            # Notify listener of voice activity state
+            if self._vad_activity_callback:
+                self._vad_activity_callback(has_voice)
+
+            if not has_voice and (now - self._last_voice_time) >= self._silence_timeout:
                 log.info("Silence timeout reached (%.1fs)", self._silence_timeout)
                 self._vad_enabled = False  # Prevent re-triggering
                 if self._silence_callback:
