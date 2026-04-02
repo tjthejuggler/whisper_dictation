@@ -1,18 +1,28 @@
-# Whisper Dictation
+# Voice Assistant & Whisper Dictation
 
-A minimal KDE Plasma system tray application for voice dictation using [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with Vulkan GPU acceleration (Intel Arc iGPU).
+A locally-hosted voice assistant and dictation system tray application for KDE Plasma on X11. Uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with Vulkan GPU acceleration (Intel Arc iGPU) for fast speech-to-text, [openwakeword](https://github.com/dscripka/openWakeWord) for hands-free wake word detection, and [webrtcvad](https://github.com/wiseman/py-webrtcvad) for voice activity detection.
 
-Click the tray icon to start recording. Click again to stop, transcribe, and type the result into the focused window.
+## Features
+
+- **Manual Dictation (Mode A):** Click tray icon to start/stop recording. Text is transcribed and pasted into the focused window.
+- **Voice-Triggered Dictation (Mode B):** Say the wake word → say "Dictate" → speak freely → silence auto-stops and pastes text.
+- **Voice Commands:** Say the wake word → speak a mapped phrase → executes a keyboard shortcut via `xdotool`.
+- **Wake Word Detection:** Always-on listening via `openwakeword` (runs locally, no cloud).
+- **OSD Popup:** Semi-transparent floating pill shows "Listening..." when wake word is detected.
+- **Settings GUI:** Right-click tray icon → Settings to configure silence timeout and voice command mappings.
+- **Unified Audio Engine:** Single PyAudio stream prevents ALSA/PipeWire device lockouts.
 
 ## Requirements
 
 - **Kubuntu / KDE Plasma on X11**
-- **Python 3.8+**
-- **PyQt5** — for the system tray icon
-- **arecord** — for audio capture (`alsa-utils` package)
+- **Python 3.10+**
+- **PyQt6** — for the system tray icon and GUI
+- **PyAudio** — for unified microphone capture
+- **openwakeword** — for wake word detection
+- **webrtcvad** — for voice activity / silence detection
 - **sox** — for silence trimming
-- **xdotool** — for simulating keyboard paste into the active window
-- **xsel** — for clipboard-based text injection (exits immediately, unlike xclip)
+- **xdotool** — for simulating keyboard shortcuts and paste
+- **xsel** — for clipboard-based text injection
 - **whisper.cpp** — compiled `whisper-cli` binary with Vulkan GPU support
 
 ## Quick Start
@@ -28,11 +38,14 @@ source venv/bin/activate
 # 3. Install Python dependencies
 pip install -r requirements.txt
 
-# 4. Build whisper.cpp with Vulkan and download the model
+# 4. Install system dependencies
+sudo apt install sox xdotool xsel xclip libportaudio2 portaudio19-dev
+
+# 5. Build whisper.cpp with Vulkan and download the model
 ./setup_whisper.sh
 
-# 5. Run the tray app
-python main.py
+# 6. Run the tray app
+./run_dictation.sh
 ```
 
 ## Setup Details
@@ -40,7 +53,7 @@ python main.py
 ### System Dependencies
 
 ```bash
-sudo apt install alsa-utils sox xdotool xsel
+sudo apt install sox xdotool xsel xclip libportaudio2 portaudio19-dev
 ```
 
 ### whisper.cpp with Vulkan
@@ -112,7 +125,7 @@ cmake --build build --config Release -j$(nproc)
 
 ## Install (Autostart)
 
-Run the installer to add Whisper Dictation to your KDE autostart and application launcher:
+Run the installer to add the voice assistant to your KDE autostart and application launcher:
 
 ```bash
 ./install.sh
@@ -137,10 +150,46 @@ source venv/bin/activate
 python main.py
 ```
 
+### Manual Dictation (Mode A)
+
 - **Left-click** the tray icon to **start recording** (icon turns green)
 - **Left-click again** to **stop recording and transcribe** (icon shows processing state)
 - Transcribed text is automatically pasted into the focused window via clipboard
-- **Right-click** for context menu (Start/Stop, Quit)
+- Silence does **not** stop recording — only a second click does
+
+### Voice-Triggered Dictation (Mode B)
+
+1. Say the **wake word** (e.g., "Hey Jarvis") — OSD popup shows "Listening..."
+2. Say **"Dictate"** — OSD changes to "Dictating..."
+3. **Speak freely** — audio is recorded
+4. **Stop speaking** — after the configured silence timeout (default 2.5s), recording auto-stops
+5. Text is transcribed and pasted into the focused window
+
+### Voice Commands
+
+1. Say the **wake word** — OSD popup shows "Listening..."
+2. Say a **mapped phrase** (e.g., "Open Project Alpha")
+3. The corresponding **keyboard shortcut** is executed via `xdotool`
+
+Configure voice commands in **Settings** (right-click tray icon → Settings).
+
+### Settings
+
+Right-click the tray icon → **Settings** to configure:
+- **Wake Word:** Choose from 6 bundled models — Alexa, Hey Jarvis, Hey Marvin, Hey Mycroft, Timer, Weather (default: Hey Jarvis). Or select **"Custom (.onnx file)..."** to load your own openwakeword model via file browser.
+- **Silence Timeout:** How long silence must last to auto-stop voice-triggered dictation (1.5s–5.0s)
+- **Command Mappings:** Table of voice phrase → keyboard shortcut pairs
+
+Settings are saved to `config.json` and persist between reboots. Wake word changes take effect immediately (model reloads in background).
+
+### Custom Wake Words
+
+To use a wake word not in the bundled list:
+
+1. **Train your own model** using the [openwakeword training notebook](https://github.com/dscripka/openWakeWord#training-new-models) (Google Colab, ~30 min)
+2. **Download a community model** `.onnx` file from the [openwakeword model repo](https://github.com/dscripka/openWakeWord/tree/main/openwakeword/resources/models)
+3. In **Settings → Wake Word**, select **"Custom (.onnx file)..."** and browse to your `.onnx` file
+4. Click **Save** — the model loads immediately
 
 ## Debugging / Profiling
 
@@ -159,29 +208,46 @@ cat /tmp/vibe_debug.log
 
 ## How It Works
 
-The pipeline has 5 stages:
+### Audio Engine
 
-1. **Record** — `arecord` captures 16kHz/16-bit/mono WAV audio from the microphone
-2. **Stop** — `arecord` is terminated via SIGTERM, finalizing the WAV file
+A single continuous PyAudio microphone stream (16kHz, 16-bit, mono) is maintained at all times:
+- **Idle:** Audio feeds into `openwakeword` for wake word detection
+- **Recording:** Audio is written to a WAV file for whisper.cpp processing
+
+This prevents Linux ALSA/PipeWire "Device Busy" lockouts that occur when multiple processes try to open the microphone.
+
+### Transcription Pipeline
+
+1. **Record** — PyAudio captures 16kHz/16-bit/mono WAV audio
+2. **Stop** — Recording stops (manual click or silence timeout)
 3. **Trim** — `sox` strips leading/trailing silence to prevent Whisper hallucinations
-4. **Transcribe** — `whisper-cli` (Vulkan-accelerated on Intel Arc iGPU) processes the audio with:
-   - Large V3 Turbo Q5 quantized model (RAM-efficient)
-   - Vulkan GPU backend for fast encoder inference
-   - 6 CPU threads (`-t 6`) pinned to P-cores only
-   - Entropy threshold of 2.4 (anti-hallucination)
-   - Lean context prompt for coding terminology
-   - English language forced
-5. **Inject** — `xsel` copies text to clipboard, then `xdotool` simulates Ctrl+V to paste instantly
+4. **Transcribe** — `whisper-cli` (Vulkan-accelerated on Intel Arc iGPU) processes the audio
+5. **Inject** — `xsel` copies text to clipboard, then `xdotool` simulates Ctrl+V to paste
+
+### Wake Word Flow
+
+1. `openwakeword` continuously analyzes audio chunks from the PyAudio stream
+2. When confidence exceeds threshold, the app enters "Listening" state
+3. A short recording captures the voice command
+4. `whisper-cli` transcribes the command
+5. The command is matched against built-in commands ("Dictate") and user-defined mappings
+6. Matched commands trigger dictation mode or keyboard shortcuts
 
 ## File Structure
 
 ```
 whisper_dictation/
-├── main.py              # Entry point — tray icon and app lifecycle
+├── main.py              # Entry point — tray icon, app lifecycle, integration
+├── audio_engine.py      # Unified PyAudio stream, wake word, VAD
 ├── dictation.py         # DictationManager — record/trim/transcribe/inject pipeline
-├── config.py            # Paths and constants
+├── voice_commands.py    # Command matching and xdotool shortcut execution
+├── settings_manager.py  # JSON config persistence and Settings GUI window
+├── osd_popup.py         # On-Screen Display popup (borderless, semi-transparent)
+├── config.py            # Paths, constants, and default settings
 ├── setup_whisper.sh     # Build whisper.cpp with Vulkan + download model
 ├── install.sh           # Installer — autostart and app launcher entries
+├── run_dictation.sh     # Launcher script (activates venv + runs main.py)
+├── config.json          # User settings (created on first save)
 ├── icons/
 │   ├── mic-on.svg       # Tray icon: recording active (green)
 │   └── mic-off.svg      # Tray icon: idle (gray)
@@ -193,6 +259,8 @@ whisper_dictation/
 
 ## Changelog
 
+- **2026-04-01T16:13 UTC-6** — Added custom wake word support. Users can now load any `.onnx` openwakeword model via a file browser in Settings (select "Custom (.onnx file)..." from the wake word dropdown). Custom model path is persisted in `config.json`. Also includes the 6 bundled models (Alexa, Hey Jarvis, Hey Marvin, Hey Mycroft, Timer, Weather). Fixed openwakeword v0.4.0 API usage.
+- **2026-04-01T15:38 UTC-6** — Major expansion: voice assistant features. Added wake word detection (`openwakeword`), voice-triggered dictation with silence auto-stop (`webrtcvad`), voice command mappings with keyboard shortcut execution, OSD popup, settings GUI, unified PyAudio audio engine. Migrated from PyQt5 to PyQt6. Replaced `arecord` subprocess with continuous PyAudio stream to prevent ALSA/PipeWire device lockouts. New modules: `audio_engine.py`, `osd_popup.py`, `voice_commands.py`, `settings_manager.py`. Existing dictation pipeline (sox → whisper-cli → xsel → xdotool) preserved intact.
 - **2026-04-01T13:56 UTC-6** — Identified root cause of Vulkan performance regression: Ubuntu's `glslc` (shaderc 2025.2) does not support `GL_EXT_integer_dot_product`, so whisper.cpp's DP4A-optimized quantized matmul shaders are compiled out at build time. This causes the Vulkan backend to fall back to generic (non-DP4A) compute shaders, resulting in ~5x slower encode times (~17s vs ~3.7s). The regression was introduced by whisper.cpp commit `0810f025` (2025-03-31) which added DP4A MMQ shaders behind a compile-time feature gate. Fix requires installing the LunarG Vulkan SDK's `glslc` and rebuilding. Documented in README under "Vulkan Performance Fix".
 - **2026-04-01T13:14 UTC-6** — Three Vulkan speed optimizations: (1) P-core thread pinning (`-t 6`) to avoid spilling into slower E-cores on the Intel Core Ultra 9 185H hybrid architecture; (2) aggressive silence trimming via sox reverse trick to chop trailing dead air without touching natural pauses; (3) shortened `--prompt` from 13 tokens to 5 to reduce token processing overhead. Also cleaned up ~5.1GB of OpenVINO artifacts (FP32 encoder model, Python venv, cache).
 - **2026-04-01T12:57 UTC-6** — Reverted from OpenVINO back to Vulkan-only build after benchmarking showed OpenVINO is 3.7–6x slower. Root cause: the OpenVINO encoder uses a full-precision FP32 model (~2.5GB) while Vulkan uses the quantized Q5_0 model (573MB) directly on the GPU. Additionally, the previous OpenVINO build had accidentally dropped Vulkan support entirely (`-DGGML_VULKAN` was OFF), causing pure CPU fallback (22s encode). Rebuilt with `-DGGML_VULKAN=1 -DWHISPER_OPENVINO=OFF`. Restored `-t 4` threads (Vulkan original). Documented benchmark results in README.
@@ -205,4 +273,4 @@ whisper_dictation/
 
 ---
 
-*Last updated: 2026-04-01T13:56 UTC-6*
+*Last updated: 2026-04-01T16:13 UTC-6*
