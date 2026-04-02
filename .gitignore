@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 .lsp_mcp.port
 config.json
+
+# Memory Bank (local AI context)
+memory-bank/
