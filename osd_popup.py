@@ -72,7 +72,7 @@ class OSDPopup(QWidget):
         self._label_opacity.setOpacity(1.0)
         self._label_wrapper.setGraphicsEffect(self._label_opacity)
 
-        # Animation for text fade-out
+        # Animation for text fade
         self._label_anim = QPropertyAnimation(self._label_opacity, b"opacity")
         self._label_anim.setEasingCurve(QEasingCurve.Type.InQuad)
 
@@ -152,8 +152,8 @@ class OSDPopup(QWidget):
             # Quickly boost toward 0.85
             target = 0.85
             duration = 200  # fast response
-            # If text was fading, restore it
-            if self._text_fading:
+            # If text was fading, restore it instantly (match image speed)
+            if self._text_fading or self._label_opacity.opacity() < 1.0:
                 self._label_anim.stop()
                 self._label_opacity.setOpacity(1.0)
                 self._text_fading = False

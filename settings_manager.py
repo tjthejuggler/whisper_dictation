@@ -21,7 +21,7 @@ _DEFAULTS = {
     "wake_word_enabled": True,
     "wake_word_model": config.DEFAULT_WAKE_WORD,
     "custom_wake_word_path": "",        # absolute path to user's .onnx file
-    "command_mappings": [],             # list of {"phrase": str, "shortcut": str}
+    "command_mappings": [],             # list of {"phrase": str, "shortcut": str, "label": str}
 }
 
 
@@ -56,7 +56,7 @@ class SettingsWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Voice Assistant Settings")
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(600)
         self.setMinimumHeight(400)
         self._settings = load_settings()
         self._build_ui()
@@ -130,13 +130,18 @@ class SettingsWindow(QWidget):
         cmd_group = QGroupBox("Voice Command Mappings")
         cmd_layout = QVBoxLayout(cmd_group)
 
-        self._table = QTableWidget(0, 2)
-        self._table.setHorizontalHeaderLabels(["Voice Phrase", "Keyboard Shortcut"])
+        self._table = QTableWidget(0, 3)
+        self._table.setHorizontalHeaderLabels(
+            ["Voice Phrase", "Action (shortcut or script:name.sh)", "OSD Label"]
+        )
         self._table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
         self._table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch
+        )
+        self._table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
         )
         cmd_layout.addWidget(self._table)
 
@@ -204,12 +209,14 @@ class SettingsWindow(QWidget):
         for i, mapping in enumerate(mappings):
             self._table.setItem(i, 0, QTableWidgetItem(mapping.get("phrase", "")))
             self._table.setItem(i, 1, QTableWidgetItem(mapping.get("shortcut", "")))
+            self._table.setItem(i, 2, QTableWidgetItem(mapping.get("label", "")))
 
     def _add_row(self):
         row = self._table.rowCount()
         self._table.insertRow(row)
         self._table.setItem(row, 0, QTableWidgetItem(""))
         self._table.setItem(row, 1, QTableWidgetItem(""))
+        self._table.setItem(row, 2, QTableWidgetItem(""))
 
     def _remove_selected(self):
         rows = set(idx.row() for idx in self._table.selectedIndexes())
@@ -222,10 +229,15 @@ class SettingsWindow(QWidget):
         for row in range(self._table.rowCount()):
             phrase_item = self._table.item(row, 0)
             shortcut_item = self._table.item(row, 1)
+            label_item = self._table.item(row, 2)
             phrase = phrase_item.text().strip() if phrase_item else ""
             shortcut = shortcut_item.text().strip() if shortcut_item else ""
+            label = label_item.text().strip() if label_item else ""
             if phrase and shortcut:
-                mappings.append({"phrase": phrase, "shortcut": shortcut})
+                mapping = {"phrase": phrase, "shortcut": shortcut}
+                if label:
+                    mapping["label"] = label
+                mappings.append(mapping)
 
         self._settings["wake_word_model"] = self._ww_combo.currentData()
         self._settings["custom_wake_word_path"] = self._custom_path_edit.text()

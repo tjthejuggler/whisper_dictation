@@ -4,11 +4,11 @@
 import logging
 import os
 import shutil
+import subprocess
 import sys
 
 from PyQt6.QtCore import QSize, Qt, QThread, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QAction
-from PyQt6.QtSvg import QSvgRenderer
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QAction, QColor, QPen
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
 import config
@@ -20,19 +20,51 @@ from dictation import (
 )
 from osd_popup import OSDPopup
 from settings_manager import SettingsWindow, load_settings, save_settings
-from voice_commands import match_command, execute_shortcut
+from voice_commands import match_command, execute_action
 
 
-def _load_svg_icon(path):
-    """Load an SVG file as a QIcon using QSvgRenderer."""
-    renderer = QSvgRenderer(path)
-    if not renderer.isValid():
-        return QIcon(path)
-    pixmap = QPixmap(QSize(64, 64))
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
+def _make_avatar_icon(active=False):
+    """Create a tray icon from alkelly-head.png.
+
+    Takes a square crop from the top of the image so the face fills the
+    tray icon at any panel size.
+
+    Args:
+        active: If False, draw a red diagonal line across (idle/muted).
+                If True, show the image without the line (recording/listening).
+    """
+    avatar_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "icons", "alkelly-head.png"
+    )
+    source = QPixmap(avatar_path)
+    if source.isNull():
+        # Fallback: simple colored square
+        fallback = QPixmap(QSize(128, 128))
+        fallback.fill(QColor("#4CAF50") if active else QColor("#9E9E9E"))
+        return QIcon(fallback)
+
+    # Square-crop from the top centre so the face fills the icon.
+    crop_size = min(source.width(), source.height())
+    crop_x = (source.width() - crop_size) // 2
+    cropped = source.copy(crop_x, 0, crop_size, crop_size)
+
+    # Scale to 128x128 for high-DPI tray icon
+    pixmap = cropped.scaled(
+        QSize(128, 128),
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+
+    if not active:
+        # Draw a red diagonal line across the image
+        painter = QPainter(pixmap)
+        pen = QPen(QColor("#F44336"))
+        pen.setWidth(10)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(8, 8, pixmap.width() - 8, pixmap.height() - 8)
+        painter.end()
+
     return QIcon(pixmap)
 
 
@@ -58,6 +90,30 @@ def check_dependencies():
     return errors
 
 
+def _mute_system_audio():
+    """Mute the default PulseAudio/PipeWire sink."""
+    try:
+        subprocess.run(
+            ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "1"],
+            timeout=2, check=False, capture_output=True,
+        )
+        log.info("System audio muted")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        log.warning("pactl not available — cannot mute audio")
+
+
+def _unmute_system_audio():
+    """Unmute the default PulseAudio/PipeWire sink."""
+    try:
+        subprocess.run(
+            ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"],
+            timeout=2, check=False, capture_output=True,
+        )
+        log.info("System audio unmuted")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        log.warning("pactl not available — cannot unmute audio")
+
+
 class TrayApp(QObject):
     """System tray application — integrates audio engine, dictation, wake word, OSD."""
 
@@ -76,9 +132,9 @@ class TrayApp(QObject):
         # Load settings
         self._settings = load_settings()
 
-        # Icons
-        self.icon_on = _load_svg_icon(config.ICON_MIC_ON)
-        self.icon_off = _load_svg_icon(config.ICON_MIC_OFF)
+        # Icons — avatar-based (with/without red line)
+        self.icon_on = _make_avatar_icon(active=True)
+        self.icon_off = _make_avatar_icon(active=False)
 
         # Audio engine (unified PyAudio stream)
         self.audio_engine = AudioEngine()
@@ -149,6 +205,9 @@ class TrayApp(QObject):
         log.info("Wake word activated — entering LISTENING state")
         self._app_state = STATE_LISTENING
 
+        # Mute system audio so the mic doesn't pick up playback
+        _mute_system_audio()
+
         # Show OSD
         self.osd.show_message("Listening...")
 
@@ -203,6 +262,7 @@ class TrayApp(QObject):
         if not text:
             log.info("Empty command — returning to idle")
             self.osd.hide_message()
+            _unmute_system_audio()
             self._app_state = STATE_IDLE
             return
 
@@ -213,18 +273,31 @@ class TrayApp(QObject):
             # Mode B: Voice-triggered dictation
             log.info("Voice command: DICTATE — starting voice-triggered dictation")
             self.osd.show_message("Dictating...")
+            _unmute_system_audio()
             self._app_state = STATE_IDLE  # Reset so dictation manager can take over
             self.dictation.start_voice_dictation()
         elif mapping:
-            # Execute keyboard shortcut
-            log.info("Voice command: %s -> %s", mapping["phrase"], mapping["shortcut"])
-            self.osd.hide_message()
-            execute_shortcut(mapping["shortcut"])
-            self._app_state = STATE_IDLE
+            # Execute keyboard shortcut or script
+            shortcut = mapping["shortcut"]
+            label = mapping.get("label", "")
+            log.info("Voice command: %s -> %s", mapping["phrase"], shortcut)
+
+            # Show gerund label on OSD if provided, then hide after delay
+            if label:
+                self.osd.show_message(f"{label}...")
+                QTimer.singleShot(2000, self._return_to_idle)
+            else:
+                self.osd.hide_message()
+
+            _unmute_system_audio()
+            execute_action(shortcut)
+            if not label:
+                self._app_state = STATE_IDLE
         else:
             # No match
             log.info("No command matched: %r", text)
             self.osd.show_message(f"Unknown: {text[:30]}")
+            _unmute_system_audio()
             QTimer.singleShot(2000, self._return_to_idle)
 
     def _return_to_idle(self):
@@ -244,6 +317,7 @@ class TrayApp(QObject):
             self.audio_engine.stop_recording()
             self.audio_engine.set_silence_callback(None)
             self.osd.hide_message()
+            _unmute_system_audio()
             self._app_state = STATE_IDLE
             return
 

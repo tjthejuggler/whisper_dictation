@@ -61,8 +61,11 @@ DEFAULT_SILENCE_TIMEOUT = 2.5           # Seconds of silence to auto-stop dictat
 MIN_SILENCE_TIMEOUT = 1.5
 MAX_SILENCE_TIMEOUT = 5.0
 
-# ── Settings persistence ──────────────────────────────────────────
+# ── Scripts directory ─────────────────────────────────────────────
 _DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPTS_DIR = os.path.join(_DIR, "scripts")
+
+# ── Settings persistence ──────────────────────────────────────────
 CONFIG_JSON = os.path.join(_DIR, "config.json")
 
 # ── Icon paths (relative to this file's directory) ────────────────

@@ -6,7 +6,7 @@ A locally-hosted voice assistant and dictation system tray application for KDE P
 
 - **Manual Dictation (Mode A):** Click tray icon to start/stop recording. Text is transcribed and pasted into the focused window.
 - **Voice-Triggered Dictation (Mode B):** Say the wake word → say "Dictate" → speak freely → silence auto-stops and pastes text.
-- **Voice Commands:** Say the wake word → speak a mapped phrase → executes a keyboard shortcut via `xdotool`.
+- **Voice Commands:** Say the wake word → speak a mapped phrase → executes a keyboard shortcut via `xdotool` or runs a script from the `scripts/` directory.
 - **Wake Word Detection:** Always-on listening via `openwakeword` (runs locally, no cloud).
 - **OSD Popup:** Old-timey silent-film style floating panel shows "Listening..." with 3x-scaled voice-reactive avatar image (brightens on speech, fades on silence) when wake word is detected.
 - **Settings GUI:** Right-click tray icon → Settings to configure silence timeout and voice command mappings.
@@ -169,16 +169,35 @@ python main.py
 
 1. Say the **wake word** — OSD popup shows "Listening..."
 2. Say a **mapped phrase** (e.g., "Open Project Alpha")
-3. The corresponding **keyboard shortcut** is executed via `xdotool`
+3. The corresponding **keyboard shortcut** is executed via `xdotool`, or a **script** from `scripts/` is run
 
 Configure voice commands in **Settings** (right-click tray icon → Settings).
+
+### Voice Command Scripts
+
+Voice commands can trigger shell scripts instead of keyboard shortcuts. Place executable scripts in the `scripts/` directory and reference them in command mappings with the `script:` prefix.
+
+**Built-in example scripts:**
+
+| Phrase | Action | OSD Label | Description |
+|--------|--------|-----------|-------------|
+| "talk" | `script:talk.sh` | Talking | Plays an MP3 from a random position, looping continuously via `mpv` |
+| "stop" | `script:stop.sh` | Stopping | Stops the MP3 playback (kills `mpv`) |
+
+**Adding your own scripts:**
+
+1. Create an executable shell script in `scripts/` (e.g., `scripts/my-action.sh`)
+2. In **Settings → Command Mappings**, add a row with your trigger phrase and `script:my-action.sh`
+3. Scripts run detached in the background — they won't block the voice assistant
+
+> **Note:** The `talk.sh` script requires `mpv`: `sudo apt install mpv`
 
 ### Settings
 
 Right-click the tray icon → **Settings** to configure:
 - **Wake Word:** Choose from 6 bundled models — Alexa, Hey Jarvis, Hey Marvin, Hey Mycroft, Timer, Weather (default: Hey Jarvis). Or select **"Custom (.onnx file)..."** to load your own openwakeword model via file browser.
 - **Silence Timeout:** How long silence must last to auto-stop voice-triggered dictation (1.5s–5.0s)
-- **Command Mappings:** Table of voice phrase → keyboard shortcut pairs
+- **Command Mappings:** Table of voice phrase → action (keyboard shortcut or `script:name.sh`) with optional OSD label
 
 Settings are saved to `config.json` and persist between reboots. Wake word changes take effect immediately (model reloads in background).
 
@@ -248,6 +267,9 @@ whisper_dictation/
 ├── install.sh           # Installer — autostart and app launcher entries
 ├── run_dictation.sh     # Launcher script (activates venv + runs main.py)
 ├── config.json          # User settings (created on first save)
+├── scripts/
+│   ├── talk.sh          # Voice command script: play MP3 from random position, loop
+│   └── stop.sh          # Voice command script: stop MP3 playback
 ├── icons/
 │   ├── mic-on.svg       # Tray icon: recording active (green)
 │   ├── mic-off.svg      # Tray icon: idle (gray)
@@ -259,6 +281,9 @@ whisper_dictation/
 ```
 
 ## Changelog
+
+- **2026-04-01T20:22 UTC-6** — Multiple improvements: (1) OSD label fade fix — text now restores instantly when speech resumes instead of lagging behind the avatar. (2) Reduced talk.sh startup lag by replacing ffprobe duration lookup with mpv percentage-based seeking (`--start=N%`). (3) System audio muting — `pactl` mutes default sink when wake word activates, unmutes after command completes. (4) Added 3rd "OSD Label" column to command mappings for gerund display (e.g., "Talking...", "Stopping..."). (5) Replaced mic SVG tray icons with alkelly-head.png avatar — red diagonal line when idle, clean image when recording.
+- **2026-04-01T20:04 UTC-6** — Added voice command scripts support. Voice commands can now trigger shell scripts (prefixed with `script:`) in addition to keyboard shortcuts. Created `scripts/` directory with two example scripts: `talk.sh` (plays an MP3 from a random position via `mpv`, looping continuously) and `stop.sh` (kills `mpv` playback). Added `SCRIPTS_DIR` to `config.py`, `execute_script()` and `execute_action()` to `voice_commands.py`. Command mappings in `config.json` now support `script:name.sh` syntax.
 
 - **2026-04-01T19:54 UTC-6** — OSD fade-to-zero: avatar now fades completely to 0% opacity during silence (was 25%). When avatar drops below 10%, "Listening..." text rapidly fades out (300ms) so text disappears just before the image. Both elements fully vanish when silence timeout is reached. Text opacity restores instantly when speech resumes. Implemented via `_label_wrapper` QWidget with its own `QGraphicsOpacityEffect` (needed because the label already uses `QGraphicsDropShadowEffect`), monitored through `opacityChanged` signal.
 - **2026-04-01T19:47 UTC-6** — OSD popup aesthetic overhaul: old-timey silent-film style with large serif font (Georgia 28pt, warm ivory text on dark background, 3px letter-spacing). Added `alkelly-head.png` avatar image (scaled 3x to ~447×471) below "Listening..." text. Avatar is **voice-reactive**: starts at 25% opacity, boosts to 85% when speech detected (200ms fast response), fades to 0% during silence (1.5s gentle fade). VAD activity callback added to `AudioEngine.set_vad_activity_callback()`, bridged to OSD via `_vad_activity` Qt signal in `main.py`. Avatar only appears during "Listening..." state.
@@ -276,4 +301,4 @@ whisper_dictation/
 
 ---
 
-*Last updated: 2026-04-01T19:54 UTC-6*
+*Last updated: 2026-04-01T20:22 UTC-6*
