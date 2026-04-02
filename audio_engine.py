@@ -13,6 +13,13 @@ import webrtcvad
 import config
 
 log = logging.getLogger("audio_engine")
+log.setLevel(logging.DEBUG)
+# Add file handler for debugging wake word flow
+if not any(isinstance(h, logging.FileHandler) for h in log.handlers):
+    _ae_fh = logging.FileHandler("/tmp/voice_assistant_debug.log", mode="a")
+    _ae_fh.setLevel(logging.DEBUG)
+    _ae_fh.setFormatter(logging.Formatter("%(asctime)s  %(name)s  %(levelname)-5s  %(message)s"))
+    log.addHandler(_ae_fh)
 
 # webrtcvad requires frames of 10, 20, or 30 ms at 16kHz
 # 16000 * 0.030 = 480 samples per 30ms frame

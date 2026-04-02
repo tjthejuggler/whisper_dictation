@@ -110,6 +110,12 @@ class OSDPopup(QWidget):
 
     def show_message(self, text="Listening..."):
         """Display the OSD at the top-center of the primary screen."""
+        # Stop all running animations FIRST to prevent them from overriding
+        # the opacity values we're about to set.
+        self._voice_anim.stop()
+        self._label_anim.stop()
+        self._text_fading = False
+
         self._label.setText(text)
         self._label.adjustSize()
 
@@ -118,15 +124,11 @@ class OSDPopup(QWidget):
         if is_listening:
             self._avatar.show()
             self._opacity_effect.setOpacity(0.25)
-            self._label_opacity.setOpacity(1.0)
-            self._label_anim.stop()
-            self._text_fading = False
         else:
-            self._voice_anim.stop()
-            self._label_anim.stop()
             self._avatar.hide()
-            self._label_opacity.setOpacity(1.0)
-            self._text_fading = False
+
+        # Always restore label to full opacity
+        self._label_opacity.setOpacity(1.0)
 
         self.adjustSize()
 
@@ -181,7 +183,7 @@ class OSDPopup(QWidget):
 
     def _on_avatar_opacity_changed(self, opacity):
         """When avatar gets very faint, rapidly fade the text label too."""
-        if self._text_fading or opacity > 0.10:
+        if self._text_fading or opacity > 0.10 or not self._avatar.isVisible():
             return
         # Avatar is at or below 10% — start rapid text fade
         self._text_fading = True

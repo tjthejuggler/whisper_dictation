@@ -22,6 +22,14 @@ from osd_popup import OSDPopup
 from settings_manager import SettingsWindow, load_settings, save_settings
 from voice_commands import match_command, execute_action
 
+# Add file handler so wake-word flow debug messages are captured
+# (the dictation file handler is only created on-demand during dictation sessions)
+if not any(isinstance(h, logging.FileHandler) for h in log.handlers):
+    _fh = logging.FileHandler("/tmp/voice_assistant_debug.log", mode="w")
+    _fh.setLevel(logging.DEBUG)
+    _fh.setFormatter(logging.Formatter("%(asctime)s  %(name)s  %(levelname)-5s  %(message)s"))
+    log.addHandler(_fh)
+
 
 def _make_avatar_icon(active=False):
     """Create a tray icon from alkelly-head.png.
@@ -198,6 +206,7 @@ class TrayApp(QObject):
 
     def _on_wake_word(self):
         """Handle wake word detection (runs on main thread)."""
+        log.info("Wake word signal received — current _app_state=%s", self._app_state)
         if self._app_state != STATE_IDLE:
             log.info("Wake word ignored — app not idle (state=%s)", self._app_state)
             return
@@ -230,6 +239,7 @@ class TrayApp(QObject):
 
     def _on_command_silence(self):
         """Silence detected after wake word — transcribe and process command."""
+        log.info("Silence timeout — current _app_state=%s", self._app_state)
         if self._app_state != STATE_LISTENING:
             return
 
@@ -252,6 +262,7 @@ class TrayApp(QObject):
 
     def _on_command_transcribed(self, text):
         """Handle the transcribed voice command."""
+        log.info("Command transcribed: %r — current _app_state=%s", text, self._app_state)
         # Clean up thread
         if self._cmd_thread is not None:
             self._cmd_thread.quit()
@@ -302,6 +313,7 @@ class TrayApp(QObject):
 
     def _return_to_idle(self):
         """Return to idle state and hide OSD."""
+        log.info("_return_to_idle called — setting _app_state=IDLE (was %s)", self._app_state)
         self.osd.hide_message()
         self._app_state = STATE_IDLE
 
@@ -325,6 +337,7 @@ class TrayApp(QObject):
 
     def _on_state_changed(self, state):
         """Update tray icon and tooltip based on dictation state."""
+        log.info("_on_state_changed(%s) — current _app_state=%s", state, self._app_state)
         if state == STATE_RECORDING:
             self.tray.setIcon(self.icon_on)
             self.tray.setToolTip("Voice Assistant — Recording...")

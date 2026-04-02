@@ -282,6 +282,7 @@ whisper_dictation/
 
 ## Changelog
 
+- **2026-04-01T21:30 UTC-6** — Fixed two OSD popup bugs: (1) Avatar image and label never reappearing after first fade — root cause was `_voice_anim` not being stopped in `show_message()` before setting opacity values, allowing the running animation to override them back to 0. Also added `isVisible()` guard to `_on_avatar_opacity_changed()` to prevent label fade when avatar is hidden. (2) OSD label (e.g., "Talking...", "Stopping...") never showing for voice commands — same root cause: label opacity was stuck at 0 from the previous fade animation. Fix: stop all animations at the top of `show_message()` before setting any opacity values.
 - **2026-04-01T20:22 UTC-6** — Multiple improvements: (1) OSD label fade fix — text now restores instantly when speech resumes instead of lagging behind the avatar. (2) Reduced talk.sh startup lag by replacing ffprobe duration lookup with mpv percentage-based seeking (`--start=N%`). (3) System audio muting — `pactl` mutes default sink when wake word activates, unmutes after command completes. (4) Added 3rd "OSD Label" column to command mappings for gerund display (e.g., "Talking...", "Stopping..."). (5) Replaced mic SVG tray icons with alkelly-head.png avatar — red diagonal line when idle, clean image when recording.
 - **2026-04-01T20:04 UTC-6** — Added voice command scripts support. Voice commands can now trigger shell scripts (prefixed with `script:`) in addition to keyboard shortcuts. Created `scripts/` directory with two example scripts: `talk.sh` (plays an MP3 from a random position via `mpv`, looping continuously) and `stop.sh` (kills `mpv` playback). Added `SCRIPTS_DIR` to `config.py`, `execute_script()` and `execute_action()` to `voice_commands.py`. Command mappings in `config.json` now support `script:name.sh` syntax.
 
@@ -301,4 +302,4 @@ whisper_dictation/
 
 ---
 
-*Last updated: 2026-04-01T20:22 UTC-6*
+*Last updated: 2026-04-01T21:30 UTC-6*
