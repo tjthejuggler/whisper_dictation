@@ -27,10 +27,13 @@ def match_command(text, command_mappings):
     normalized = text.strip().lower()
     log.info("Matching command: %r against %d mappings", normalized, len(command_mappings))
 
-    # Check for "dictate" command first (built-in)
-    if normalized in ("dictate", "dictation", "start dictation", "start dictating"):
-        log.info("Matched built-in DICTATE command")
-        return {"phrase": "dictate", "shortcut": "__DICTATE__"}
+    # Check for "dictate" command first (built-in) — use substring match
+    # because whisper transcribes the full utterance, not just the keyword
+    _DICTATE_KEYWORDS = ("dictate", "dictation", "start dictation", "start dictating")
+    for kw in _DICTATE_KEYWORDS:
+        if kw in normalized:
+            log.info("Matched built-in DICTATE command (keyword=%r in %r)", kw, normalized)
+            return {"phrase": "dictate", "shortcut": "__DICTATE__"}
 
     # Check user-defined command mappings
     for mapping in command_mappings:
