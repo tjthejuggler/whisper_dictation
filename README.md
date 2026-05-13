@@ -4,9 +4,11 @@ A locally-hosted voice assistant and dictation system tray application for KDE P
 
 ## Features
 
-- **Manual Dictation (Mode A):** Click tray icon to start/stop recording. Text is transcribed and pasted into the focused window.
+- **Manual Dictation (Mode A):** Click tray icon or press a hotkey to start/stop recording. Text is transcribed and pasted into the focused window.
 - **Voice-Triggered Dictation (Mode B):** Say the wake word → say "Dictate" → speak freely → silence auto-stops and pastes text.
 - **Voice Commands:** Say the wake word → speak a mapped phrase → executes a keyboard shortcut via `xdotool` or runs a script from the `scripts/` directory.
+- **Hotkey Toggle:** Bind `scripts/toggle_dictation.sh` to any keyboard shortcut for hands-free start/stop of dictation. The tray icon updates just like a click.
+- **Send Button in Settings:** Each command in Settings has a "Send" button to execute the action immediately without voice input.
 - **Wake Word Detection:** Always-on listening via `openwakeword` (runs locally, no cloud).
 - **OSD Popup:** Old-timey silent-film style floating panel shows "Listening..." with 3x-scaled voice-reactive avatar image (brightens on speech, fades on silence) when wake word is detected.
 - **Settings GUI:** Right-click tray icon → Settings to configure silence timeout and voice command mappings.
@@ -23,6 +25,7 @@ A locally-hosted voice assistant and dictation system tray application for KDE P
 - **sox** — for silence trimming
 - **xdotool** — for simulating keyboard shortcuts and paste
 - **xsel** — for clipboard-based text injection
+- **socat** — for IPC socket communication (hotkey toggle)
 - **whisper.cpp** — compiled `whisper-cli` binary with Vulkan GPU support
 
 ## Quick Start
@@ -39,7 +42,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 4. Install system dependencies
-sudo apt install sox xdotool xsel xclip libportaudio2 portaudio19-dev
+sudo apt install sox xdotool xsel xclip libportaudio2 portaudio19-dev socat
 
 # 5. Build whisper.cpp with Vulkan and download the model
 ./setup_whisper.sh
@@ -53,7 +56,7 @@ sudo apt install sox xdotool xsel xclip libportaudio2 portaudio19-dev
 ### System Dependencies
 
 ```bash
-sudo apt install sox xdotool xsel xclip libportaudio2 portaudio19-dev
+sudo apt install sox xdotool xsel xclip libportaudio2 portaudio19-dev socat
 ```
 
 ### whisper.cpp with Vulkan
@@ -154,8 +157,9 @@ python main.py
 
 - **Left-click** the tray icon to **start recording** (icon turns green)
 - **Left-click again** to **stop recording and transcribe** (icon shows processing state)
+- Or bind a **hotkey** to `scripts/toggle_dictation.sh` — it toggles the same way (icon updates too)
 - Transcribed text is automatically pasted into the focused window via clipboard
-- Silence does **not** stop recording — only a second click does
+- Silence does **not** stop recording — only a second click or hotkey press does
 
 ### Voice-Triggered Dictation (Mode B)
 
@@ -192,14 +196,25 @@ Voice commands can trigger shell scripts instead of keyboard shortcuts. Place ex
 
 > **Note:** The `talk.sh` script requires `mpv`: `sudo apt install mpv`
 
+### Hotkey Toggle
+
+Bind `scripts/toggle_dictation.sh` to a keyboard shortcut in KDE System Settings → Shortcuts:
+
+1. Open **System Settings → Shortcuts → Custom Shortcuts**
+2. Click **Edit → New → Global Shortcut → Command/URL**
+3. Set the **Trigger** to your desired key combination
+4. Set the **Action** to: `/home/twain/Projects/whisper_dictation/scripts/toggle_dictation.sh`
+
+The script sends a `toggle` command to the running app via a Unix domain socket (`/tmp/voice_assistant_ipc.sock`). The tray icon and menu update exactly as if you had clicked the icon.
+
+> **Note:** Requires `socat` — install with `sudo apt install socat`
+
 ### Settings
 
 Right-click the tray icon → **Settings** to configure:
 - **Wake Word:** Choose from 6 bundled models — Alexa, Hey Jarvis, Hey Marvin, Hey Mycroft, Timer, Weather (default: Hey Jarvis). Or select **"Custom (.onnx file)..."** to load your own openwakeword model via file browser.
 - **Silence Timeout:** How long silence must last to auto-stop voice-triggered dictation (1.5s–5.0s)
-- **Command Mappings:** Table of voice phrase → action (keyboard shortcut or `script:name.sh`) with optional OSD label
-
-Settings are saved to `config.json` and persist between reboots. Wake word changes take effect immediately (model reloads in background).
+- **Command Mappings:** Table of voice phrase → action (keyboard shortcut or `script:name.sh`) with optional OSD label. Each row has a **Send** button to execute the action immediately.
 
 ### Custom Wake Words
 
@@ -256,7 +271,7 @@ This prevents Linux ALSA/PipeWire "Device Busy" lockouts that occur when multipl
 
 ```
 whisper_dictation/
-├── main.py              # Entry point — tray icon, app lifecycle, integration
+├── main.py              # Entry point — tray icon, app lifecycle, IPC socket, integration
 ├── audio_engine.py      # Unified PyAudio stream, wake word, VAD
 ├── dictation.py         # DictationManager — record/trim/transcribe/inject pipeline
 ├── voice_commands.py    # Command matching and xdotool shortcut execution
@@ -268,8 +283,9 @@ whisper_dictation/
 ├── run_dictation.sh     # Launcher script (activates venv + runs main.py)
 ├── config.json          # User settings (created on first save)
 ├── scripts/
-│   ├── talk.sh          # Voice command script: play MP3 from random position, loop
-│   └── stop.sh          # Voice command script: stop MP3 playback
+│   ├── toggle_dictation.sh  # Hotkey script: toggle dictation via IPC socket
+│   ├── talk.sh              # Voice command script: play MP3 from random position, loop
+│   └── stop.sh              # Voice command script: stop MP3 playback
 ├── icons/
 │   ├── mic-on.svg       # Tray icon: recording active (green)
 │   ├── mic-off.svg      # Tray icon: idle (gray)
@@ -282,6 +298,7 @@ whisper_dictation/
 
 ## Changelog
 
+- **2026-05-13T08:34 UTC** — Two new features: (1) **Send button in Settings** — each command mapping row now has a "Send" button that executes the action immediately (keyboard shortcut or script) without needing voice input. (2) **Hotkey toggle** — added a Unix domain IPC socket (`/tmp/voice_assistant_ipc.sock`) to `TrayApp` so external scripts can send commands (toggle/start/stop). Created `scripts/toggle_dictation.sh` for binding to a KDE keyboard shortcut — toggles dictation on/off with full icon state synchronization. Requires `socat` for IPC communication.
 - **2026-04-01T21:30 UTC-6** — Fixed two OSD popup bugs: (1) Avatar image and label never reappearing after first fade — root cause was `_voice_anim` not being stopped in `show_message()` before setting opacity values, allowing the running animation to override them back to 0. Also added `isVisible()` guard to `_on_avatar_opacity_changed()` to prevent label fade when avatar is hidden. (2) OSD label (e.g., "Talking...", "Stopping...") never showing for voice commands — same root cause: label opacity was stuck at 0 from the previous fade animation. Fix: stop all animations at the top of `show_message()` before setting any opacity values.
 - **2026-04-01T20:22 UTC-6** — Multiple improvements: (1) OSD label fade fix — text now restores instantly when speech resumes instead of lagging behind the avatar. (2) Reduced talk.sh startup lag by replacing ffprobe duration lookup with mpv percentage-based seeking (`--start=N%`). (3) System audio muting — `pactl` mutes default sink when wake word activates, unmutes after command completes. (4) Added 3rd "OSD Label" column to command mappings for gerund display (e.g., "Talking...", "Stopping..."). (5) Replaced mic SVG tray icons with alkelly-head.png avatar — red diagonal line when idle, clean image when recording.
 - **2026-04-01T20:04 UTC-6** — Added voice command scripts support. Voice commands can now trigger shell scripts (prefixed with `script:`) in addition to keyboard shortcuts. Created `scripts/` directory with two example scripts: `talk.sh` (plays an MP3 from a random position via `mpv`, looping continuously) and `stop.sh` (kills `mpv` playback). Added `SCRIPTS_DIR` to `config.py`, `execute_script()` and `execute_action()` to `voice_commands.py`. Command mappings in `config.json` now support `script:name.sh` syntax.
@@ -302,4 +319,4 @@ whisper_dictation/
 
 ---
 
-*Last updated: 2026-04-01T21:30 UTC-6*
+*Last updated: 2026-05-13T08:34 UTC*

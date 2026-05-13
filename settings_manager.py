@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 )
 
 import config
+from voice_commands import execute_action
 
 log = logging.getLogger("settings")
 
@@ -98,23 +99,30 @@ class SettingsWindow(QWidget):
 
         # ── Silence Timeout ───────────────────────────────────────
         timeout_group = QGroupBox("Voice-Triggered Dictation")
-        timeout_layout = QHBoxLayout(timeout_group)
+        timeout_layout = QVBoxLayout(timeout_group)
 
-        timeout_layout.addWidget(QLabel("Silence timeout:"))
+        hint = QLabel('Say "dictate", "dictation", or "start dictation" after the wake word to begin dictating.')
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888; font-style: italic; font-size: 11px;")
+        timeout_layout.addWidget(hint)
+
+        timeout_row = QHBoxLayout()
+        timeout_row.addWidget(QLabel("Silence timeout:"))
         self._timeout_spin = QDoubleSpinBox()
         self._timeout_spin.setRange(config.MIN_SILENCE_TIMEOUT,
                                      config.MAX_SILENCE_TIMEOUT)
         self._timeout_spin.setSingleStep(0.1)
         self._timeout_spin.setSuffix(" s")
         self._timeout_spin.setDecimals(1)
-        timeout_layout.addWidget(self._timeout_spin)
+        timeout_row.addWidget(self._timeout_spin)
 
         self._timeout_slider = QSlider(Qt.Orientation.Horizontal)
         self._timeout_slider.setRange(
             int(config.MIN_SILENCE_TIMEOUT * 10),
             int(config.MAX_SILENCE_TIMEOUT * 10),
         )
-        timeout_layout.addWidget(self._timeout_slider)
+        timeout_row.addWidget(self._timeout_slider)
+        timeout_layout.addLayout(timeout_row)
 
         # Sync slider ↔ spinbox
         self._timeout_slider.valueChanged.connect(
@@ -130,9 +138,9 @@ class SettingsWindow(QWidget):
         cmd_group = QGroupBox("Voice Command Mappings")
         cmd_layout = QVBoxLayout(cmd_group)
 
-        self._table = QTableWidget(0, 3)
+        self._table = QTableWidget(0, 4)
         self._table.setHorizontalHeaderLabels(
-            ["Voice Phrase", "Action (shortcut or script:name.sh)", "OSD Label"]
+            ["Voice Phrase", "Action (shortcut or script:name.sh)", "OSD Label", "Send"]
         )
         self._table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
@@ -142,6 +150,9 @@ class SettingsWindow(QWidget):
         )
         self._table.horizontalHeader().setSectionResizeMode(
             2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self._table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
         )
         cmd_layout.addWidget(self._table)
 
@@ -210,6 +221,7 @@ class SettingsWindow(QWidget):
             self._table.setItem(i, 0, QTableWidgetItem(mapping.get("phrase", "")))
             self._table.setItem(i, 1, QTableWidgetItem(mapping.get("shortcut", "")))
             self._table.setItem(i, 2, QTableWidgetItem(mapping.get("label", "")))
+            self._add_send_button(i)
 
     def _add_row(self):
         row = self._table.rowCount()
@@ -217,6 +229,7 @@ class SettingsWindow(QWidget):
         self._table.setItem(row, 0, QTableWidgetItem(""))
         self._table.setItem(row, 1, QTableWidgetItem(""))
         self._table.setItem(row, 2, QTableWidgetItem(""))
+        self._add_send_button(row)
 
     def _remove_selected(self):
         rows = set(idx.row() for idx in self._table.selectedIndexes())
@@ -247,6 +260,28 @@ class SettingsWindow(QWidget):
         save_settings(self._settings)
         self.settings_changed.emit(self._settings)
         self.close()
+
+    def _add_send_button(self, row):
+        """Add a 'Send' button to the given table row."""
+        btn = QPushButton("Send")
+        btn.setToolTip("Execute this command now")
+        btn.clicked.connect(lambda checked=False, b=btn: self._on_send_clicked(b))
+        self._table.setCellWidget(row, 3, btn)
+
+    def _on_send_clicked(self, btn):
+        """Handle click on a Send button — find its row and execute."""
+        for row in range(self._table.rowCount()):
+            if self._table.cellWidget(row, 3) is btn:
+                self._send_command(row)
+                return
+
+    def _send_command(self, row):
+        """Execute the action for the given table row."""
+        shortcut_item = self._table.item(row, 1)
+        shortcut = shortcut_item.text().strip() if shortcut_item else ""
+        if shortcut:
+            log.info("Send button clicked for row %d: %s", row, shortcut)
+            execute_action(shortcut)
 
     def show_and_raise(self):
         """Show window and bring to front."""

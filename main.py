@@ -4,10 +4,11 @@
 import logging
 import os
 import shutil
+import socket
 import subprocess
 import sys
 
-from PyQt6.QtCore import QSize, Qt, QThread, QTimer, pyqtSignal, QObject
+from PyQt6.QtCore import QSize, Qt, QThread, QTimer, QSocketNotifier, pyqtSignal, QObject
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QAction, QColor, QPen
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
@@ -197,6 +198,11 @@ class TrayApp(QObject):
 
         self.tray.show()
 
+        # IPC socket for external commands (e.g. hotkey toggle)
+        self._ipc_server = None
+        self._ipc_notifier = None
+        self._setup_ipc()
+
         # Start audio engine
         self.audio_engine.start()
 
@@ -382,8 +388,69 @@ class TrayApp(QObject):
                  settings["silence_timeout"],
                  len(settings.get("command_mappings", [])))
 
+    def _setup_ipc(self):
+        """Create a Unix domain socket for external IPC commands."""
+        sock_path = config.IPC_SOCKET_PATH
+        # Clean up stale socket
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+        try:
+            self._ipc_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self._ipc_server.bind(sock_path)
+            self._ipc_server.listen(1)
+            self._ipc_server.setblocking(False)
+            # Use QSocketNotifier to watch for incoming connections
+            self._ipc_notifier = QSocketNotifier(
+                self._ipc_server.fileno(), QSocketNotifier.Type.Read, self
+            )
+            self._ipc_notifier.activated.connect(self._on_ipc_ready_read)
+            log.info("IPC socket listening on %s", sock_path)
+        except OSError as exc:
+            log.warning("Failed to create IPC socket: %s", exc)
+            self._ipc_server = None
+
+    def _on_ipc_ready_read(self):
+        """Handle incoming IPC connection."""
+        if self._ipc_server is None:
+            return
+        try:
+            conn, _ = self._ipc_server.accept()
+            data = conn.recv(256).decode("utf-8", errors="replace").strip()
+            conn.close()
+        except OSError:
+            return
+        self._handle_ipc_command(data)
+
+    def _handle_ipc_command(self, data):
+        """Process an IPC command string."""
+        log.info("IPC command received: %r", data)
+        if data == "toggle":
+            # Invoke _toggle on the main thread via QTimer (safe for Qt)
+            QTimer.singleShot(0, self._toggle)
+        elif data == "start":
+            if self._app_state == STATE_IDLE:
+                QTimer.singleShot(0, self._toggle)
+        elif data == "stop":
+            if self._app_state in (STATE_RECORDING, STATE_LISTENING):
+                QTimer.singleShot(0, self._toggle)
+        else:
+            log.warning("Unknown IPC command: %r", data)
+
+    def _cleanup_ipc(self):
+        """Remove the IPC socket."""
+        if self._ipc_notifier is not None:
+            self._ipc_notifier.setEnabled(False)
+            self._ipc_notifier = None
+        if self._ipc_server is not None:
+            self._ipc_server.close()
+            self._ipc_server = None
+        sock_path = config.IPC_SOCKET_PATH
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+
     def _quit(self):
         """Clean shutdown."""
+        self._cleanup_ipc()
         self.dictation.stop()
         self.audio_engine.stop()
         self.osd.hide_message()

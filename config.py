@@ -72,5 +72,8 @@ CONFIG_JSON = os.path.join(_DIR, "config.json")
 ICON_MIC_ON = os.path.join(_DIR, "icons", "mic-on.svg")
 ICON_MIC_OFF = os.path.join(_DIR, "icons", "mic-off.svg")
 
+# ── IPC socket path (for external toggle commands) ────────────────
+IPC_SOCKET_PATH = "/tmp/voice_assistant_ipc.sock"
+
 # ── Legacy arecord command (kept for reference, replaced by PyAudio) ─
 ARECORD_CMD = ["arecord", "-D", "pulse", "-f", "S16_LE", "-c1", "-r16000", RAW_WAV]
